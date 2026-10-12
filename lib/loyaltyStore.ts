@@ -41,6 +41,12 @@ export interface ScanActivity {
   badge: string;
 }
 
+export interface MerchantMetrics {
+  todayScans: number;
+  activeLoyalists: number;
+  rewardsGiven: number;
+}
+
 const STORAGE_KEYS = {
   BUSINESS: 'loyalvisit_business_profile',
   CUSTOMER_SESSION: 'loyalvisit_customer_session',
@@ -50,50 +56,63 @@ const STORAGE_KEYS = {
 };
 
 const isValidUuid = (val: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+  Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
 export const DEFAULT_BUSINESS: BusinessProfile = {
-  id: '11111111-1111-4111-a111-111111111111',
-  name: 'Saffron Artisanal Cafe',
-  category: 'Specialty Coffee & Bakery',
-  phone: '+91 98765 43210',
-  instagram_handle: 'saffron_cafe_hyd',
-  google_review_link: 'https://g.page/r/saffron-cafe-hyd/review',
+  id: '',
+  name: '',
+  category: '',
+  phone: '',
+  instagram_handle: '',
+  google_review_link: '',
   active_game_type: 'mystery_vault',
   target_stamps: 5,
-  reward_description: 'Free Signature Artisanal Beverage & Truffle Croissant',
+  reward_description: 'Store Reward',
 };
 
 export const DEFAULT_CUSTOMER: CustomerSession = {
-  id: '22222222-2222-4222-a222-222222222222',
+  id: '',
   phone: '',
   isLoggedIn: false,
-  registeredAt: new Date().toISOString(),
+  registeredAt: '',
 };
 
 export const DEFAULT_LOYALTY: LoyaltyRecord = {
-  id: '33333333-3333-4333-a333-333333333333',
-  businessId: '11111111-1111-4111-a111-111111111111',
-  customerId: '22222222-2222-4222-a222-222222222222',
-  currentStamps: 3,
-  totalRewards: 1,
+  id: '',
+  businessId: '',
+  customerId: '',
+  currentStamps: 0,
+  totalRewards: 0,
   isFollowed: false,
   isReviewed: false,
-  lastUpdated: new Date().toISOString(),
+  lastUpdated: '',
 };
 
-export const DEFAULT_METRICS = {
-  todayScans: 48,
-  activeLoyalists: 142,
-  rewardsGiven: 18,
+export const DEFAULT_METRICS: MerchantMetrics = {
+  todayScans: 0,
+  activeLoyalists: 0,
+  rewardsGiven: 0,
 };
 
-export const DEFAULT_HISTORY: ScanActivity[] = [
-  { id: '1', customerPhone: '+91 98765 43210', action: '+2 Stamps (Mystery Vault)', time: '2m ago', badge: 'Active' },
-  { id: '2', customerPhone: '+91 91234 56789', action: 'Claimed: Truffle Croissant', time: '14m ago', badge: 'Reward' },
-  { id: '3', customerPhone: '+91 99887 76655', action: '+1 Stamp (Follow Bonus)', time: '29m ago', badge: 'Bonus' },
-  { id: '4', customerPhone: '+91 94400 11223', action: '+1 Stamp (Counter Visit)', time: '41m ago', badge: 'Visit' },
-];
+export const DEFAULT_HISTORY: ScanActivity[] = [];
+
+// Cookie storage helpers for persistent sessions
+function setCookie(name: string, value: string, days = 365) {
+  if (typeof document === 'undefined') return;
+  const expires = new Date(Date.now() + days * 864e5).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+}
+
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function deleteCookie(name: string) {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=; Max-Age=0; path=/`;
+}
 
 function readStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -119,67 +138,172 @@ export function useLoyaltyStore() {
   const [business, setBusinessState] = useState<BusinessProfile>(DEFAULT_BUSINESS);
   const [customer, setCustomerState] = useState<CustomerSession>(DEFAULT_CUSTOMER);
   const [loyalty, setLoyaltyState] = useState<LoyaltyRecord>(DEFAULT_LOYALTY);
-  const [metrics, setMetricsState] = useState(DEFAULT_METRICS);
+  const [metrics, setMetricsState] = useState<MerchantMetrics>(DEFAULT_METRICS);
   const [history, setHistoryState] = useState<ScanActivity[]>(DEFAULT_HISTORY);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const loadLocalState = useCallback(() => {
+    // Check cookie first for persistent customer session
+    const cookieSessionRaw = getCookie('loyalvisit_customer_session');
+    let session = readStorage(STORAGE_KEYS.CUSTOMER_SESSION, DEFAULT_CUSTOMER);
+    if (cookieSessionRaw) {
+      try {
+        const parsed = JSON.parse(cookieSessionRaw);
+        if (parsed && parsed.phone) {
+          session = parsed;
+        }
+      } catch {}
+    }
+
     setBusinessState(readStorage(STORAGE_KEYS.BUSINESS, DEFAULT_BUSINESS));
-    setCustomerState(readStorage(STORAGE_KEYS.CUSTOMER_SESSION, DEFAULT_CUSTOMER));
+    setCustomerState(session);
     setLoyaltyState(readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY));
     setMetricsState(readStorage(STORAGE_KEYS.METRICS, DEFAULT_METRICS));
     setHistoryState(readStorage(STORAGE_KEYS.HISTORY, DEFAULT_HISTORY));
   }, []);
 
-  // Fetch or sync from Supabase
+  // Fetch live state from Supabase
   const syncWithSupabase = useCallback(async () => {
     if (!supabase) return;
     try {
       setIsSyncing(true);
-      // Attempt to load business
+
+      // 1. Fetch active business
       const { data: bData } = await supabase
         .from('businesses')
         .select('*')
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
+      let activeBizId = '';
       if (bData) {
-        setBusinessState((prev) => {
-          const updated: BusinessProfile = {
-            ...prev,
-            id: bData.id || prev.id,
-            name: bData.name || prev.name,
-            category: bData.category || prev.category,
-            phone: bData.phone || prev.phone,
-            instagram_handle: bData.instagram_handle || prev.instagram_handle,
-            google_review_link: bData.google_review_link || prev.google_review_link,
-            active_game_type: (bData.active_game_type as BusinessProfile['active_game_type']) || prev.active_game_type,
-          };
-          writeStorage(STORAGE_KEYS.BUSINESS, updated);
-          return updated;
-        });
+        activeBizId = bData.id;
+        const updatedBiz: BusinessProfile = {
+          id: bData.id,
+          name: bData.name || 'Store',
+          category: bData.category || 'Retail & Cafe',
+          phone: bData.phone || '',
+          instagram_handle: bData.instagram_handle || '',
+          google_review_link: bData.google_review_link || '',
+          active_game_type: 'mystery_vault',
+          target_stamps: 5,
+          reward_description: 'Store Reward',
+        };
+
+        // Fetch reward rule for this business
+        const { data: rData } = await supabase
+          .from('reward_rules')
+          .select('*')
+          .eq('business_id', bData.id)
+          .maybeSingle();
+
+        if (rData) {
+          updatedBiz.target_stamps = rData.target_stamps || 5;
+          updatedBiz.reward_description = rData.reward_description || 'Store Reward';
+        }
+
+        setBusinessState(updatedBiz);
+        writeStorage(STORAGE_KEYS.BUSINESS, updatedBiz);
       }
 
-      // Attempt to load reward rule
-      const { data: rData } = await supabase
-        .from('reward_rules')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
-
-      if (rData) {
-        setBusinessState((prev) => {
-          const updated = {
-            ...prev,
-            target_stamps: rData.target_stamps || prev.target_stamps,
-            reward_description: rData.reward_description || prev.reward_description,
-          };
-          writeStorage(STORAGE_KEYS.BUSINESS, updated);
-          return updated;
-        });
+      // 2. Fetch or sync active customer session
+      let currentCust = readStorage(STORAGE_KEYS.CUSTOMER_SESSION, DEFAULT_CUSTOMER);
+      const cookieSession = getCookie('loyalvisit_customer_session');
+      if (cookieSession) {
+        try {
+          const parsed = JSON.parse(cookieSession);
+          if (parsed && parsed.phone) currentCust = parsed;
+        } catch {}
       }
-    } catch {
-      // Graceful local mode fallback
+
+      if (currentCust && currentCust.phone) {
+        // Look up customer in Supabase customers table
+        const { data: cData } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('phone_number', currentCust.phone)
+          .maybeSingle();
+
+        let realCustId = currentCust.id;
+        if (cData) {
+          realCustId = cData.id;
+          const verifiedCust: CustomerSession = {
+            id: cData.id,
+            phone: cData.phone_number,
+            isLoggedIn: true,
+            registeredAt: cData.created_at || new Date().toISOString(),
+          };
+          setCustomerState(verifiedCust);
+          writeStorage(STORAGE_KEYS.CUSTOMER_SESSION, verifiedCust);
+          setCookie('loyalvisit_customer_session', JSON.stringify(verifiedCust), 365);
+        }
+
+        // 3. Fetch loyalty card for customer & business
+        if (realCustId && activeBizId) {
+          const { data: cardData } = await supabase
+            .from('loyalty_cards')
+            .select('*')
+            .eq('business_id', activeBizId)
+            .eq('customer_id', realCustId)
+            .maybeSingle();
+
+          if (cardData) {
+            const updatedCard: LoyaltyRecord = {
+              id: cardData.id,
+              businessId: cardData.business_id,
+              customerId: cardData.customer_id,
+              currentStamps: cardData.current_stamps || 0,
+              totalRewards: cardData.total_rewards || 0,
+              isFollowed: false,
+              isReviewed: false,
+              lastUpdated: cardData.updated_at || new Date().toISOString(),
+            };
+            setLoyaltyState(updatedCard);
+            writeStorage(STORAGE_KEYS.LOYALTY, updatedCard);
+          }
+        }
+      }
+
+      // 4. Fetch real merchant metrics & live activity
+      if (activeBizId) {
+        const { data: cards, count } = await supabase
+          .from('loyalty_cards')
+          .select('id, current_stamps, total_rewards, updated_at, customers(phone_number)', { count: 'exact' })
+          .eq('business_id', activeBizId)
+          .order('updated_at', { ascending: false });
+
+        if (cards) {
+          const totalScans = cards.reduce((acc, c) => acc + (c.current_stamps || 0) + ((c.total_rewards || 0) * 5), 0);
+          const totalRewards = cards.reduce((acc, c) => acc + (c.total_rewards || 0), 0);
+
+          const liveMetrics: MerchantMetrics = {
+            todayScans: totalScans,
+            activeLoyalists: count || cards.length,
+            rewardsGiven: totalRewards,
+          };
+          setMetricsState(liveMetrics);
+          writeStorage(STORAGE_KEYS.METRICS, liveMetrics);
+
+          // Build live history from actual database transactions
+          const realHistory: ScanActivity[] = cards.map((c, i) => {
+            const custObj = c.customers as unknown as { phone_number?: string } | null;
+            const phoneStr = custObj?.phone_number || `Customer #${i + 1}`;
+            return {
+              id: c.id,
+              customerPhone: phoneStr,
+              action: `${c.current_stamps} Keys Unlocked`,
+              time: c.updated_at ? new Date(c.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent',
+              badge: (c.current_stamps >= 5) ? 'Vault Unlocked' : 'Active',
+            };
+          });
+
+          setHistoryState(realHistory);
+          writeStorage(STORAGE_KEYS.HISTORY, realHistory);
+        }
+      }
+    } catch (err) {
+      console.error('Supabase sync error:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -192,10 +316,9 @@ export function useLoyaltyStore() {
     window.addEventListener('loyalvisit_state_sync', handleSync);
     window.addEventListener('storage', handleSync);
 
-    // Initial Supabase fetch
     syncWithSupabase();
 
-    // Supabase Realtime channel subscription for multi-device sync
+    // Supabase Realtime subscription
     let channel: ReturnType<typeof supabase.channel> | null = null;
     try {
       if (typeof window !== 'undefined' && supabase) {
@@ -209,13 +332,12 @@ export function useLoyaltyStore() {
                 writeStorage(STORAGE_KEYS.LOYALTY, next);
                 return next;
               });
+              syncWithSupabase();
             }
           })
           .subscribe();
       }
-    } catch {
-      // Ignore websocket errors in unsupported environments
-    }
+    } catch {}
 
     return () => {
       window.removeEventListener('loyalvisit_state_sync', handleSync);
@@ -226,7 +348,101 @@ export function useLoyaltyStore() {
     };
   }, [loadLocalState, syncWithSupabase]);
 
-  // Award stamps to customer
+  // Real Customer Login with persistent session
+  const loginCustomer = useCallback(async (phone: string, businessId?: string, initialStamps = 0) => {
+    const formattedPhone = phone.includes('+91')
+      ? phone
+      : `+91 ${phone.replace(/\D/g, '').slice(-10)}`;
+
+    let customerId = `cust_${phone.replace(/\D/g, '').slice(-10)}`;
+    let registeredAt = new Date().toISOString();
+
+    // 1. Upsert customer in Supabase
+    try {
+      if (supabase) {
+        const { data: cData } = await supabase
+          .from('customers')
+          .upsert({ phone_number: formattedPhone }, { onConflict: 'phone_number' })
+          .select()
+          .single();
+
+        if (cData) {
+          customerId = cData.id;
+          registeredAt = cData.created_at || registeredAt;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to upsert customer in Supabase:', err);
+    }
+
+    const session: CustomerSession = {
+      id: customerId,
+      phone: formattedPhone,
+      isLoggedIn: true,
+      registeredAt,
+    };
+
+    setCustomerState(session);
+    writeStorage(STORAGE_KEYS.CUSTOMER_SESSION, session);
+    setCookie('loyalvisit_customer_session', JSON.stringify(session), 365);
+
+    // 2. Fetch or create loyalty card in Supabase
+    const targetBizId = businessId || business.id;
+    let stamps = initialStamps;
+    let loyaltyCardId = '';
+
+    try {
+      if (supabase && isValidUuid(customerId) && isValidUuid(targetBizId)) {
+        const { data: existingCard } = await supabase
+          .from('loyalty_cards')
+          .select('*')
+          .eq('business_id', targetBizId)
+          .eq('customer_id', customerId)
+          .maybeSingle();
+
+        if (existingCard) {
+          stamps = existingCard.current_stamps;
+          loyaltyCardId = existingCard.id;
+        } else {
+          const { data: newCard } = await supabase
+            .from('loyalty_cards')
+            .insert({
+              business_id: targetBizId,
+              customer_id: customerId,
+              current_stamps: initialStamps,
+              total_rewards: 0,
+            })
+            .select()
+            .single();
+
+          if (newCard) {
+            loyaltyCardId = newCard.id;
+            stamps = newCard.current_stamps;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to get/create loyalty card in Supabase:', err);
+    }
+
+    const updatedLoyalty: LoyaltyRecord = {
+      id: loyaltyCardId,
+      businessId: targetBizId,
+      customerId,
+      currentStamps: stamps,
+      totalRewards: 0,
+      isFollowed: false,
+      isReviewed: false,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    setLoyaltyState(updatedLoyalty);
+    writeStorage(STORAGE_KEYS.LOYALTY, updatedLoyalty);
+
+    return session;
+  }, [business.id]);
+
+  // Award stamps to customer in Supabase
   const awardStamps = useCallback(
     async (count: number, customerPhone?: string) => {
       const currentLoyalty = readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
@@ -241,46 +457,51 @@ export function useLoyaltyStore() {
       setLoyaltyState(nextLoyalty);
       writeStorage(STORAGE_KEYS.LOYALTY, nextLoyalty);
 
-      // Update merchant metrics
-      const currentMetrics = readStorage(STORAGE_KEYS.METRICS, DEFAULT_METRICS);
-      const nextMetrics = {
-        ...currentMetrics,
-        todayScans: currentMetrics.todayScans + 1,
-      };
-      setMetricsState(nextMetrics);
-      writeStorage(STORAGE_KEYS.METRICS, nextMetrics);
-
-      // Append to scan history
-      const currentHistory = readStorage(STORAGE_KEYS.HISTORY, DEFAULT_HISTORY);
-      const newLog: ScanActivity = {
-        id: Date.now().toString(),
-        customerPhone: customerPhone || currentLoyalty.customerId || '+91 98765 43210',
-        action: `+${count} Stamp${count > 1 ? 's' : ''} Awarded`,
-        time: 'Just now',
-        badge: newStamps >= targetMax ? 'Unlocked' : 'Stamp',
-      };
-      const nextHistory = [newLog, ...currentHistory.slice(0, 9)];
-      setHistoryState(nextHistory);
-      writeStorage(STORAGE_KEYS.HISTORY, nextHistory);
-
-      // Async write to Supabase loyalty_cards if possible
+      // Async write to Supabase
       try {
-        if (supabase && isValidUuid(currentLoyalty.id)) {
-          await supabase
-            .from('loyalty_cards')
-            .update({ current_stamps: newStamps })
-            .eq('id', currentLoyalty.id);
+        if (supabase) {
+          // If we have an existing loyalty card id
+          if (isValidUuid(nextLoyalty.id)) {
+            await supabase
+              .from('loyalty_cards')
+              .update({
+                current_stamps: newStamps,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', nextLoyalty.id);
+          } else if (customerPhone && isValidUuid(business.id)) {
+            // Find customer by phone
+            const { data: cData } = await supabase
+              .from('customers')
+              .select('id')
+              .eq('phone_number', customerPhone)
+              .maybeSingle();
+
+            if (cData) {
+              await supabase
+                .from('loyalty_cards')
+                .upsert({
+                  business_id: business.id,
+                  customer_id: cData.id,
+                  current_stamps: newStamps,
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'business_id,customer_id' });
+            }
+          }
         }
-      } catch {
-        // Fallback persisted in localStorage
+      } catch (err) {
+        console.error('Error awarding stamps in Supabase:', err);
       }
+
+      // Re-sync metrics
+      setTimeout(() => syncWithSupabase(), 300);
 
       return nextLoyalty;
     },
-    [business.target_stamps]
+    [business.id, business.target_stamps, syncWithSupabase]
   );
 
-  // Redeem unlocked reward
+  // Redeem reward
   const redeemReward = useCallback(async () => {
     const currentLoyalty = readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
     const nextLoyalty: LoyaltyRecord = {
@@ -292,32 +513,27 @@ export function useLoyaltyStore() {
     setLoyaltyState(nextLoyalty);
     writeStorage(STORAGE_KEYS.LOYALTY, nextLoyalty);
 
-    // Update merchant metrics
-    const currentMetrics = readStorage(STORAGE_KEYS.METRICS, DEFAULT_METRICS);
-    const nextMetrics = {
-      ...currentMetrics,
-      rewardsGiven: currentMetrics.rewardsGiven + 1,
-    };
-    setMetricsState(nextMetrics);
-    writeStorage(STORAGE_KEYS.METRICS, nextMetrics);
+    try {
+      if (supabase && isValidUuid(nextLoyalty.id)) {
+        await supabase
+          .from('loyalty_cards')
+          .update({
+            current_stamps: 0,
+            total_rewards: nextLoyalty.totalRewards,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', nextLoyalty.id);
+      }
+    } catch (err) {
+      console.error('Error redeeming in Supabase:', err);
+    }
 
-    // Append to scan history
-    const currentHistory = readStorage(STORAGE_KEYS.HISTORY, DEFAULT_HISTORY);
-    const newLog: ScanActivity = {
-      id: Date.now().toString(),
-      customerPhone: currentLoyalty.customerId || '+91 98765 43210',
-      action: `Claimed: ${business.reward_description}`,
-      time: 'Just now',
-      badge: 'Reward',
-    };
-    setHistoryState([newLog, ...currentHistory.slice(0, 9)]);
-    writeStorage(STORAGE_KEYS.HISTORY, [newLog, ...currentHistory.slice(0, 9)]);
-
+    setTimeout(() => syncWithSupabase(), 300);
     return nextLoyalty;
-  }, [business.reward_description]);
+  }, [syncWithSupabase]);
 
-  // Social bonus (Instagram follow)
-  const claimInstagramBonus = useCallback(() => {
+  // Social bonuses
+  const claimInstagramBonus = useCallback(async () => {
     const currentLoyalty = readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
     if (currentLoyalty.isFollowed) return false;
 
@@ -331,23 +547,19 @@ export function useLoyaltyStore() {
     setLoyaltyState(nextLoyalty);
     writeStorage(STORAGE_KEYS.LOYALTY, nextLoyalty);
 
-    // Add to history
-    const currentHistory = readStorage(STORAGE_KEYS.HISTORY, DEFAULT_HISTORY);
-    const newLog: ScanActivity = {
-      id: Date.now().toString(),
-      customerPhone: '+91 98765 43210',
-      action: '+1 Stamp (Instagram Follow)',
-      time: 'Just now',
-      badge: 'Bonus',
-    };
-    setHistoryState([newLog, ...currentHistory.slice(0, 9)]);
-    writeStorage(STORAGE_KEYS.HISTORY, [newLog, ...currentHistory.slice(0, 9)]);
+    try {
+      if (supabase && isValidUuid(nextLoyalty.id)) {
+        await supabase
+          .from('loyalty_cards')
+          .update({ current_stamps: newStamps })
+          .eq('id', nextLoyalty.id);
+      }
+    } catch {}
 
     return true;
   }, [business.target_stamps]);
 
-  // Social bonus (Google Review)
-  const claimReviewBonus = useCallback(() => {
+  const claimReviewBonus = useCallback(async () => {
     const currentLoyalty = readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
     if (currentLoyalty.isReviewed) return false;
 
@@ -361,10 +573,19 @@ export function useLoyaltyStore() {
     setLoyaltyState(nextLoyalty);
     writeStorage(STORAGE_KEYS.LOYALTY, nextLoyalty);
 
+    try {
+      if (supabase && isValidUuid(nextLoyalty.id)) {
+        await supabase
+          .from('loyalty_cards')
+          .update({ current_stamps: newStamps })
+          .eq('id', nextLoyalty.id);
+      }
+    } catch {}
+
     return true;
   }, [business.target_stamps]);
 
-  // Update business settings
+  // Update business profile in Supabase
   const updateBusiness = useCallback(
     async (updated: Partial<BusinessProfile>) => {
       const current = readStorage(STORAGE_KEYS.BUSINESS, DEFAULT_BUSINESS);
@@ -379,57 +600,36 @@ export function useLoyaltyStore() {
             .update({
               name: next.name,
               category: next.category,
+              phone: next.phone,
               instagram_handle: next.instagram_handle,
               google_review_link: next.google_review_link,
             })
             .eq('id', next.id);
+
+          if (next.reward_description) {
+            await supabase
+              .from('reward_rules')
+              .upsert({
+                business_id: next.id,
+                target_stamps: next.target_stamps || 5,
+                reward_description: next.reward_description,
+              }, { onConflict: 'business_id' });
+          }
         }
-      } catch {
-        // Fallback persisted locally
+      } catch (err) {
+        console.error('Error updating business in Supabase:', err);
       }
     },
     []
   );
 
-  // Customer phone login / session set
-  const loginCustomer = useCallback((phone: string) => {
-    const session: CustomerSession = {
-      id: `cust_${phone.replace(/\D/g, '')}`,
-      phone,
-      isLoggedIn: true,
-      registeredAt: new Date().toISOString(),
-    };
-    setCustomerState(session);
-    writeStorage(STORAGE_KEYS.CUSTOMER_SESSION, session);
-
-    // Initialize or load loyalty record
-    const existingLoyalty = readStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
-    const updatedLoyalty = {
-      ...existingLoyalty,
-      customerId: session.id,
-    };
-    setLoyaltyState(updatedLoyalty);
-    writeStorage(STORAGE_KEYS.LOYALTY, updatedLoyalty);
-
-    return session;
-  }, []);
-
-  // Reset demo state
-  const resetAllDemoData = useCallback(() => {
-    setBusinessState(DEFAULT_BUSINESS);
-    writeStorage(STORAGE_KEYS.BUSINESS, DEFAULT_BUSINESS);
-
+  // Logout customer
+  const logoutCustomer = useCallback(() => {
+    deleteCookie('loyalvisit_customer_session');
     setCustomerState(DEFAULT_CUSTOMER);
     writeStorage(STORAGE_KEYS.CUSTOMER_SESSION, DEFAULT_CUSTOMER);
-
     setLoyaltyState(DEFAULT_LOYALTY);
     writeStorage(STORAGE_KEYS.LOYALTY, DEFAULT_LOYALTY);
-
-    setMetricsState(DEFAULT_METRICS);
-    writeStorage(STORAGE_KEYS.METRICS, DEFAULT_METRICS);
-
-    setHistoryState(DEFAULT_HISTORY);
-    writeStorage(STORAGE_KEYS.HISTORY, DEFAULT_HISTORY);
   }, []);
 
   return {
@@ -445,6 +645,7 @@ export function useLoyaltyStore() {
     claimReviewBonus,
     updateBusiness,
     loginCustomer,
-    resetAllDemoData,
+    logoutCustomer,
+    syncWithSupabase,
   };
 }

@@ -6,44 +6,53 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { email, password, businessName, category, instagram } = body;
 
+    if (!email || !password) {
+      return NextResponse.json(
+        { success: false, error: 'Email and password are required.' },
+        { status: 400 }
+      );
+    }
+
     let authUser: { id: string; email?: string } | null = null;
     let authErrorMessage: string | null = null;
 
-    if (supabase && email) {
-      try {
-        const uniqueEmail = email.includes('+')
-          ? email
-          : `${email.split('@')[0]}+${Date.now()}@${email.split('@')[1] || 'loyalvisit.app'}`;
-
-        const res = await supabase.auth.signUp({
-          email: uniqueEmail,
-          password: password || 'DefaultPass123!',
-          options: {
-            data: {
-              business_name: businessName,
-              category,
-              instagram_handle: instagram,
-            },
+    if (supabase) {
+      const res = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            business_name: businessName,
+            category,
+            instagram_handle: instagram,
           },
-        });
+        },
+      });
+
+      if (res.error) {
+        authErrorMessage = res.error.message;
+      } else {
         authUser = res.data?.user ? { id: res.data.user.id, email: res.data.user.email } : null;
-        authErrorMessage = res.error?.message || null;
-      } catch (err: unknown) {
-        authErrorMessage = err instanceof Error ? err.message : 'Auth error';
       }
+    }
+
+    if (authErrorMessage) {
+      return NextResponse.json(
+        { success: false, error: authErrorMessage },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      registered: !authErrorMessage,
       user: authUser,
-      message: authErrorMessage || 'Merchant registered successfully',
+      message: 'Merchant registered successfully',
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Registration failed';
     return NextResponse.json(
       { success: false, error: message },
-      { status: 200 }
+      { status: 500 }
     );
   }
 }

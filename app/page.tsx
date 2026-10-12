@@ -171,7 +171,7 @@ export default function LandingPage() {
       <section className="px-6 py-6">
         <div className="text-center mb-5">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
-            Frictionless Mechanism
+            Simple 3-Step Process
           </h3>
           <h2 className="text-2xl font-black text-gray-950">How LoyalVisit Works</h2>
         </div>
@@ -217,7 +217,7 @@ export default function LandingPage() {
                 3. Mystery Vault Unlocks Reward
               </h4>
               <p className="text-xs text-gray-500 leading-relaxed">
-                Reaching 5 keys triggers gamified reward reveals (Free Cold Brew, Bakery Discounts) bringing guests back every week.
+                Reaching 5 keys triggers your store reward reveals, bringing guests back every week.
               </p>
             </div>
           </div>

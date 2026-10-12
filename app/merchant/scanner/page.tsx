@@ -4,57 +4,94 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import BottomNav from '@/components/BottomNav';
 import { useLoyaltyStore } from '@/lib/loyaltyStore';
+import { supabase } from '@/lib/supabaseClient';
 import {
-  Sparkles,
   Check,
   Zap,
   Search,
-  Camera,
   Trophy,
   UserCheck,
+  X,
 } from 'lucide-react';
+
+interface IdentifiedCustomer {
+  id: string;
+  phone: string;
+  currentStamps: number;
+}
 
 export default function MerchantScanner() {
   const router = useRouter();
-  const { business, loyalty, awardStamps, redeemReward } = useLoyaltyStore();
+  const { business, awardStamps, redeemReward } = useLoyaltyStore();
 
   const [toast, setToast] = useState<string | null>(null);
-  const [identifiedCustomer, setIdentifiedCustomer] = useState({
-    id: loyalty.customerId || '22222222-2222-4222-a222-222222222222',
-    phone: '+91 98765 43210',
-    currentStamps: loyalty.currentStamps,
-    isLocked: true,
-  });
+  const [identifiedCustomer, setIdentifiedCustomer] = useState<IdentifiedCustomer | null>(null);
   const [manualPhone, setManualPhone] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<'initializing' | 'active' | 'simulated' | 'error'>('initializing');
 
   // QR decoding handler
-  const handleQrCodeScanned = (decodedText: string) => {
+  const handleQrCodeScanned = async (decodedText: string) => {
+    let customerPhone = '';
+    let customerId = '';
+    let currentStamps = 0;
+
     try {
       const parsed = JSON.parse(decodedText);
       if (parsed.customerId || parsed.phone) {
-        setIdentifiedCustomer({
-          id: parsed.customerId || `cust_${Date.now()}`,
-          phone: parsed.phone || '+91 98765 43210',
-          currentStamps: parsed.stamps !== undefined ? parsed.stamps : loyalty.currentStamps,
-          isLocked: true,
-        });
-        setToast(`🎯 QR Locked: ${parsed.phone || parsed.customerId}`);
-        setTimeout(() => setToast(null), 1500);
-        return;
+        customerId = parsed.customerId || '';
+        customerPhone = parsed.phone || '';
+        if (parsed.stamps !== undefined) currentStamps = parsed.stamps;
       }
     } catch {
-      // Raw string fallback
+      // Raw text phone fallback
+      const cleaned = decodedText.replace(/\D/g, '');
+      if (cleaned.length >= 10) {
+        customerPhone = `+91 ${cleaned.slice(-10)}`;
+      }
     }
+
+    if (!customerPhone && !customerId) {
+      setToast('⚠️ Invalid QR code');
+      setTimeout(() => setToast(null), 1500);
+      return;
+    }
+
+    // Look up customer in Supabase
+    try {
+      if (supabase && customerPhone) {
+        const { data: cData } = await supabase
+          .from('customers')
+          .select('id, phone_number')
+          .eq('phone_number', customerPhone)
+          .maybeSingle();
+
+        if (cData) {
+          customerId = cData.id;
+          // Look up current stamps
+          const { data: cardData } = await supabase
+            .from('loyalty_cards')
+            .select('current_stamps')
+            .eq('business_id', business.id)
+            .eq('customer_id', cData.id)
+            .maybeSingle();
+
+          if (cardData) {
+            currentStamps = cardData.current_stamps;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching customer from Supabase:', err);
+    }
+
     setIdentifiedCustomer({
-      id: `cust_${decodedText.replace(/\D/g, '').slice(-10) || '9876543210'}`,
-      phone: decodedText.includes('+91') ? decodedText : `+91 ${decodedText.replace(/\D/g, '').slice(-10) || '98765 43210'}`,
-      currentStamps: loyalty.currentStamps,
-      isLocked: true,
+      id: customerId || `cust_${customerPhone.replace(/\D/g, '').slice(-10)}`,
+      phone: customerPhone || 'Customer Pass',
+      currentStamps,
     });
-    setToast('🎯 QR Code Locked!');
+    setToast('🎯 Customer Pass Locked!');
     setTimeout(() => setToast(null), 1500);
   };
 
@@ -93,7 +130,6 @@ export default function MerchantScanner() {
         }
       } catch {
         if (isMounted) {
-          // Fallback if browser/environment doesn't have camera or permission
           setCameraStatus('simulated');
         }
       }
@@ -116,18 +152,34 @@ export default function MerchantScanner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync identified customer with live loyalty store
-  useEffect(() => {
-    setIdentifiedCustomer((prev) => ({
-      ...prev,
-      currentStamps: loyalty.currentStamps,
-    }));
-  }, [loyalty.currentStamps]);
+  const handleManualLock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = manualPhone.replace(/\D/g, '');
+    if (cleaned.length < 10) {
+      setToast('⚠️ Enter valid 10-digit number');
+      setTimeout(() => setToast(null), 1500);
+      return;
+    }
+    const fullPhone = `+91 ${cleaned.slice(-10)}`;
+    await handleQrCodeScanned(JSON.stringify({ phone: fullPhone }));
+    setShowManualInput(false);
+    setManualPhone('');
+  };
 
   const handleAddStamps = async (count: number) => {
+    if (!identifiedCustomer) {
+      setShowManualInput(true);
+      setToast('⚠️ Scan QR or enter phone first');
+      setTimeout(() => setToast(null), 1800);
+      return;
+    }
+
     if (isProcessing) return;
     setIsProcessing(true);
     setToast(`+${count} Stamp${count > 1 ? 's' : ''} Awarded!`);
+
+    const newTotal = Math.min(identifiedCustomer.currentStamps + count, 5);
+    setIdentifiedCustomer((prev) => prev ? { ...prev, currentStamps: newTotal } : null);
 
     await awardStamps(count, identifiedCustomer.phone);
 
@@ -138,70 +190,55 @@ export default function MerchantScanner() {
   };
 
   const handleRedeemReward = async () => {
+    if (!identifiedCustomer) return;
     setIsProcessing(true);
     await redeemReward();
     setToast('🎉 Reward Claimed & Progress Reset!');
+    setIdentifiedCustomer((prev) => prev ? { ...prev, currentStamps: 0 } : null);
     setTimeout(() => {
       setToast(null);
       setIsProcessing(false);
-    }, 1500);
+    }, 1200);
   };
-
-  const handleManualSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualPhone.length >= 4) {
-      setIdentifiedCustomer({
-        id: `cust_${manualPhone.replace(/\D/g, '')}`,
-        phone: `+91 ${manualPhone.replace(/\D/g, '').slice(-10)}`,
-        currentStamps: loyalty.currentStamps,
-        isLocked: true,
-      });
-      setShowManualInput(false);
-      setToast('Customer Found!');
-      setTimeout(() => setToast(null), 1000);
-    }
-  };
-
-  const isRewardReady = identifiedCustomer.currentStamps >= 5;
 
   return (
-    <div className="h-full flex flex-col bg-[#09090B] text-white select-none relative overflow-hidden">
-      {/* Top Banner connecting to Customer Pass */}
-      <div className="h-12 px-5 bg-black/90 backdrop-blur-md border-b border-white/10 flex items-center justify-between z-20 shrink-0">
+    <div className="h-full flex flex-col bg-black text-white relative select-none">
+      {/* Scanner Header Bar */}
+      <div className="bg-[#09090B] px-5 py-3.5 border-b border-white/10 flex items-center justify-between z-20 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs text-gray-300 font-mono font-bold">
-            Counter Scanner 01
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="font-black text-xs tracking-wider uppercase text-gray-200">
+            Fast-Scanner
           </span>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowManualInput(!showManualInput)}
-            className="text-xs text-gray-400 hover:text-white flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            className="text-[11px] font-bold text-gray-300 hover:text-white bg-white/10 hover:bg-white/15 px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <Search size={12} />
-            <span>Search Phone</span>
+            <span>{showManualInput ? 'Close' : 'Phone Input'}</span>
           </button>
+
           <button
-            onClick={() => router.push('/customer/pass')}
-            className="text-xs text-yellow-400 hover:text-yellow-300 font-bold flex items-center gap-1 bg-yellow-400/10 border border-yellow-400/20 px-2.5 py-1 rounded-lg active:scale-95 transition-transform cursor-pointer"
+            onClick={() => router.push('/merchant/dashboard')}
+            className="text-xs font-bold text-gray-400 hover:text-white px-2 py-1"
           >
-            <Sparkles size={12} />
-            <span>Pass ({identifiedCustomer.currentStamps}/5)</span>
+            Done
           </button>
         </div>
       </div>
 
-      {/* Manual Phone Fallback Search Bar */}
+      {/* Manual Phone Input Drawer */}
       {showManualInput && (
         <form
-          onSubmit={handleManualSearch}
+          onSubmit={handleManualLock}
           className="bg-neutral-900 border-b border-white/10 p-3 flex gap-2 z-20 animate-in slide-in-from-top duration-200 shrink-0"
         >
           <input
             type="tel"
-            placeholder="Enter customer 10-digit phone"
+            placeholder="Enter customer 10-digit mobile"
             value={manualPhone}
             onChange={(e) => setManualPhone(e.target.value)}
             className="flex-1 bg-black border border-white/20 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
@@ -209,9 +246,9 @@ export default function MerchantScanner() {
           />
           <button
             type="submit"
-            className="bg-[#2563EB] text-white text-xs font-bold px-3 py-2 rounded-xl"
+            className="bg-[#2563EB] text-white text-xs font-bold px-4 py-2 rounded-xl"
           >
-            Lock
+            Lock Pass
           </button>
         </form>
       )}
@@ -220,7 +257,7 @@ export default function MerchantScanner() {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {/* Camera Viewfinder (Strict Top 60%) */}
         <div className="h-[60%] shrink-0 relative flex items-center justify-center flex-col p-4 bg-[#09090B]">
-          {/* Ambient Camera Scan Effect */}
+          {/* Ambient Lighting */}
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent pointer-events-none" />
 
           {/* Viewfinder Frame */}
@@ -249,39 +286,44 @@ export default function MerchantScanner() {
             </div>
 
             {/* Locked Customer Chip */}
-            <div className="absolute bottom-2 inset-x-2 z-10 bg-black/90 backdrop-blur-md border border-white/15 px-3 py-1.5 rounded-2xl flex items-center justify-between shadow-xl">
-              <div className="flex items-center gap-2">
-                <UserCheck size={14} className="text-emerald-400 shrink-0" />
-                <div className="text-left">
-                  <span className="text-[9px] text-gray-400 font-mono block leading-none truncate max-w-[120px]">
-                    QR Locked: {identifiedCustomer.id.slice(0, 8)}...
+            {identifiedCustomer ? (
+              <div className="absolute bottom-2 inset-x-2 z-10 bg-black/90 backdrop-blur-md border border-white/15 px-3 py-1.5 rounded-2xl flex items-center justify-between shadow-xl">
+                <div className="flex items-center gap-2">
+                  <UserCheck size={14} className="text-emerald-400 shrink-0" />
+                  <div className="text-left">
+                    <span className="text-[9px] text-gray-400 font-mono block leading-none truncate max-w-[120px]">
+                      Pass Locked
+                    </span>
+                    <span className="text-xs font-bold text-white tracking-wide">
+                      {identifiedCustomer.phone}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-black bg-blue-500/20 text-[#2563EB] border border-blue-500/30 px-2 py-0.5 rounded-full shrink-0">
+                    {identifiedCustomer.currentStamps}/5 Keys
                   </span>
-                  <span className="text-xs font-bold text-white tracking-wide">
-                    {identifiedCustomer.phone}
-                  </span>
+                  <button
+                    onClick={() => setIdentifiedCustomer(null)}
+                    className="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-400 hover:text-white"
+                  >
+                    <X size={10} />
+                  </button>
                 </div>
               </div>
-              <span className="text-[10px] font-black bg-blue-500/20 text-[#2563EB] border border-blue-500/30 px-2 py-0.5 rounded-full shrink-0">
-                {identifiedCustomer.currentStamps}/5 Keys
-              </span>
-            </div>
-          </div>
-
-          {/* Test Scanner Quick Scan Action Pill */}
-          <div className="mt-4 flex items-center gap-2 z-10">
-            <button
-              onClick={() => handleQrCodeScanned(JSON.stringify({ customerId: '22222222-2222-4222-a222-222222222222', phone: '+91 98765 43210', stamps: 3 }))}
-              className="text-[10px] font-bold text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 border border-white/15 px-3 py-1 rounded-full flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Camera size={11} className="text-[#2563EB]" />
-              <span>Simulate QR Scan</span>
-            </button>
+            ) : (
+              <div className="absolute bottom-2 inset-x-2 z-10 bg-black/80 backdrop-blur-md border border-white/10 px-2 py-1.5 rounded-xl text-center">
+                <span className="text-[10px] text-gray-300 font-medium">
+                  Align QR pass or tap Phone Input
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Action Panel (Strict Bottom 40%) */}
         <div className="h-[40%] shrink-0 bg-white text-gray-900 rounded-t-[2.5rem] p-5 flex flex-col justify-between shadow-[0_-20px_50px_rgba(0,0,0,0.5)] z-10 relative">
-          {/* Floating Toast Notification (< 0.5s response) */}
+          {/* Floating Toast Notification */}
           {toast && (
             <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-600 text-white font-bold text-xs px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-2 border border-emerald-400/40 animate-in zoom-in-90 duration-150">
               <Check size={16} className="stroke-[3]" />
@@ -294,72 +336,78 @@ export default function MerchantScanner() {
             <div className="flex items-center gap-1.5">
               <Zap size={16} className="text-[#2563EB]" />
               <span className="text-xs font-black uppercase tracking-wider text-gray-500">
-                One-Tap Stamp Award
+                Single-Tap Stamp Award
               </span>
             </div>
             <span className="text-xs font-bold text-[#2563EB] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-              {business.name}
+              Mystery Vault
             </span>
           </div>
 
-          {/* Reward Burn / Claim Action if ready */}
-          {isRewardReady ? (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Trophy size={18} className="text-amber-600 shrink-0" />
-                <div>
-                  <p className="text-xs font-black text-amber-950">Reward Available!</p>
-                  <p className="text-[10px] text-amber-700 truncate max-w-[180px]">{business.reward_description}</p>
-                </div>
-              </div>
+          {/* Goal Reached Redeem Panel or Fast Stamp Buttons */}
+          {identifiedCustomer && identifiedCustomer.currentStamps >= 5 ? (
+            <div className="my-auto py-2">
               <button
                 onClick={handleRedeemReward}
-                className="bg-amber-500 hover:bg-amber-600 text-amber-950 font-black text-xs px-3 py-1.5 rounded-xl shadow-md active:scale-95 transition-all cursor-pointer shrink-0"
+                disabled={isProcessing}
+                className="w-full py-4 bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 font-black text-sm rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all animate-bounce cursor-pointer"
               >
-                Burn & Redeem
+                <Trophy size={18} />
+                <span>REDEEM VAULT REWARD & RESET</span>
               </button>
             </div>
-          ) : null}
+          ) : (
+            <div className="grid grid-cols-3 gap-3 my-auto">
+              {/* +1 Stamp */}
+              <button
+                onClick={() => handleAddStamps(1)}
+                disabled={isProcessing}
+                className="h-24 bg-gray-50 hover:bg-blue-50 border-2 border-gray-200/80 hover:border-[#2563EB] rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all group cursor-pointer shadow-xs"
+              >
+                <span className="text-3xl font-black text-gray-900 group-hover:text-[#2563EB]">
+                  +1
+                </span>
+                <span className="text-[11px] font-bold text-gray-500 group-hover:text-[#2563EB]">
+                  Stamp
+                </span>
+              </button>
 
-          {/* Massive Stamp Buttons */}
-          <div className="grid grid-cols-3 gap-3">
-            <button
-              onClick={() => handleAddStamps(1)}
-              disabled={isProcessing}
-              className="bg-[#09090B] hover:bg-neutral-800 text-white text-3xl font-black h-20 rounded-2xl active:scale-90 transition-all shadow-lg shadow-black/15 flex flex-col items-center justify-center cursor-pointer border border-neutral-800 disabled:opacity-50"
-            >
-              <span>+1</span>
-              <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400">
-                Stamp
-              </span>
-            </button>
+              {/* +2 Stamps */}
+              <button
+                onClick={() => handleAddStamps(2)}
+                disabled={isProcessing}
+                className="h-24 bg-gray-50 hover:bg-blue-50 border-2 border-gray-200/80 hover:border-[#2563EB] rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all group cursor-pointer shadow-xs"
+              >
+                <span className="text-3xl font-black text-gray-900 group-hover:text-[#2563EB]">
+                  +2
+                </span>
+                <span className="text-[11px] font-bold text-gray-500 group-hover:text-[#2563EB]">
+                  Stamps
+                </span>
+              </button>
 
-            <button
-              onClick={() => handleAddStamps(2)}
-              disabled={isProcessing}
-              className="bg-[#2563EB] hover:bg-blue-700 text-white text-3xl font-black h-20 rounded-2xl active:scale-90 transition-all shadow-lg shadow-blue-600/25 flex flex-col items-center justify-center cursor-pointer border border-blue-500 disabled:opacity-50"
-            >
-              <span>+2</span>
-              <span className="text-[10px] font-bold tracking-wider uppercase text-blue-200">
-                Stamps
-              </span>
-            </button>
+              {/* +3 Stamps */}
+              <button
+                onClick={() => handleAddStamps(3)}
+                disabled={isProcessing}
+                className="h-24 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-all shadow-lg shadow-blue-600/30 cursor-pointer"
+              >
+                <span className="text-3xl font-black text-white">+3</span>
+                <span className="text-[11px] font-bold text-blue-100">
+                  Combo
+                </span>
+              </button>
+            </div>
+          )}
 
-            <button
-              onClick={() => handleAddStamps(3)}
-              disabled={isProcessing}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-3xl font-black h-20 rounded-2xl active:scale-90 transition-all shadow-lg shadow-purple-600/25 flex flex-col items-center justify-center cursor-pointer border border-purple-500 disabled:opacity-50"
-            >
-              <span>+3</span>
-              <span className="text-[10px] font-bold tracking-wider uppercase text-purple-200">
-                Stamps
-              </span>
-            </button>
+          {/* Bottom Security Assurance */}
+          <div className="flex items-center justify-between text-[11px] text-gray-400 px-1">
+            <span>Customer: {identifiedCustomer ? identifiedCustomer.phone : 'Not locked'}</span>
+            <span className="text-emerald-600 font-bold">Supabase Realtime Sync</span>
           </div>
         </div>
       </div>
 
-      {/* Global Bottom Navigation */}
       <BottomNav />
     </div>
   );

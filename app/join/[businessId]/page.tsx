@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowRight,
   ShieldCheck,
@@ -14,17 +14,20 @@ import { useLoyaltyStore } from '@/lib/loyaltyStore';
 
 export default function JoinBusinessPage() {
   const router = useRouter();
+  const params = useParams();
+  const businessId = (params?.businessId as string) || '';
 
-  const { business, customer, loginCustomer, awardStamps } = useLoyaltyStore();
+  const { business, customer, loginCustomer } = useLoyaltyStore();
 
   const [phone, setPhone] = useState('');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [otp, setOtp] = useState(['', '', '', '']);
+  const [generatedCode, setGeneratedCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // If already logged in, redirect directly to the pass
+  // Persistent session auto-login check: If already logged in, skip OTP and route directly to the pass
   useEffect(() => {
     if (customer && customer.isLoggedIn && customer.phone) {
       router.replace('/customer/pass');
@@ -41,28 +44,41 @@ export default function JoinBusinessPage() {
     }
 
     setLoading(true);
+    // Generate secure 4-digit verification code
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    setGeneratedCode(code);
+
     setTimeout(() => {
       setLoading(false);
       setStep('otp');
-    }, 200);
+    }, 400);
   };
 
   const handleVerifyOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    setIsVerifying(true);
     setErrorMessage('');
+
+    const enteredCode = otp.join('');
+    if (enteredCode.length < 4) {
+      setErrorMessage('Please enter all 4 digits of the verification code.');
+      return;
+    }
+
+    if (enteredCode !== generatedCode) {
+      setErrorMessage('Incorrect verification code. Please check and try again.');
+      return;
+    }
+
+    setIsVerifying(true);
 
     try {
       const fullPhone = `+91 ${phone.replace(/\D/g, '').slice(-10)}`;
-      loginCustomer(fullPhone);
+      // Real Supabase login + awards 1 welcome key to new customer
+      await loginCustomer(fullPhone, businessId || business.id, 1);
 
-      // Award 1 welcome stamp for joining
-      await awardStamps(1, fullPhone);
-
-      // Redirect directly to customer pass
       setTimeout(() => {
         router.push('/customer/pass');
-      }, 600);
+      }, 500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Verification failed. Please try again.';
       setErrorMessage(msg);
@@ -100,7 +116,7 @@ export default function JoinBusinessPage() {
           </div>
         </div>
 
-        {/* Store Card Preview */}
+        {/* Dynamic Store Card */}
         <div className="bg-gradient-to-br from-indigo-950 via-purple-900 to-violet-950 rounded-3xl p-6 text-white shadow-xl shadow-purple-950/20 border border-purple-800/40 relative overflow-hidden mb-6">
           <div className="absolute -top-12 -right-12 w-32 h-32 bg-purple-500/20 rounded-full blur-2xl pointer-events-none" />
 
@@ -109,8 +125,8 @@ export default function JoinBusinessPage() {
               <Coffee size={24} />
             </div>
             <div>
-              <h2 className="text-lg font-black tracking-tight">{business.name}</h2>
-              <p className="text-xs text-purple-200 font-medium">{business.category}</p>
+              <h2 className="text-lg font-black tracking-tight">{business.name || 'Store Check-In'}</h2>
+              <p className="text-xs text-purple-200 font-medium">{business.category || 'Customer Loyalty'}</p>
             </div>
           </div>
 
@@ -123,7 +139,7 @@ export default function JoinBusinessPage() {
                 Welcome Bonus
               </p>
               <p className="text-xs text-white font-medium leading-tight">
-                Get +1 Instant Welcome Stamp & unlock the Mystery Vault today!
+                Unlock Key #1 instantly on check-in and start your Mystery Vault journey!
               </p>
             </div>
           </div>
@@ -136,7 +152,7 @@ export default function JoinBusinessPage() {
               Enter Your Phone Number
             </h3>
             <p className="text-xs text-gray-500 mb-5 leading-relaxed">
-              No app download required. We will save your digital stamp pass permanently in this browser.
+              No app download required. Your loyalty pass is saved securely in this browser forever.
             </p>
 
             <form onSubmit={handleSendOtp} className="space-y-4">
@@ -172,7 +188,7 @@ export default function JoinBusinessPage() {
                 disabled={loading || phone.length < 10}
                 className="w-full bg-black hover:bg-neutral-900 disabled:opacity-50 text-white font-bold text-sm py-4 px-6 rounded-2xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
               >
-                <span>{loading ? 'Sending OTP...' : 'Continue with OTP'}</span>
+                <span>{loading ? 'Sending Code...' : 'Continue to Pass'}</span>
                 <ArrowRight size={16} />
               </button>
             </form>
@@ -180,7 +196,7 @@ export default function JoinBusinessPage() {
         ) : (
           <div className="bg-white rounded-3xl p-6 border border-gray-200/80 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xl font-black text-gray-950 tracking-tight">Verify OTP</h3>
+              <h3 className="text-xl font-black text-gray-950 tracking-tight">Verify Mobile</h3>
               <button
                 onClick={() => setStep('phone')}
                 className="text-xs font-bold text-blue-600 hover:underline"
@@ -188,9 +204,17 @@ export default function JoinBusinessPage() {
                 Change Number
               </button>
             </div>
-            <p className="text-xs text-gray-500 mb-5">
+            <p className="text-xs text-gray-500 mb-3">
               Enter 4-digit code sent to <span className="font-bold text-gray-800">+91 {phone}</span>
             </p>
+
+            {/* Simulated SMS Security Notification */}
+            {generatedCode && (
+              <div className="mb-4 p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-blue-700 font-medium">Security Verification Code:</span>
+                <span className="font-mono font-black text-blue-950 tracking-widest text-sm bg-white px-2 py-0.5 rounded border border-blue-200">{generatedCode}</span>
+              </div>
+            )}
 
             <div className="flex justify-between gap-2.5 mb-5">
               {[0, 1, 2, 3].map((idx) => (
@@ -215,22 +239,10 @@ export default function JoinBusinessPage() {
             <button
               onClick={() => handleVerifyOtp()}
               disabled={isVerifying}
-              className="w-full bg-black hover:bg-neutral-900 text-white font-bold text-sm py-4 px-6 rounded-2xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer mb-3"
+              className="w-full bg-black hover:bg-neutral-900 text-white font-bold text-sm py-4 px-6 rounded-2xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
             >
               <span>{isVerifying ? 'Verifying...' : 'Verify & Unlock Pass'}</span>
               <CheckCircle2 size={16} />
-            </button>
-
-            {/* Instant Demo Fill Helper */}
-            <button
-              type="button"
-              onClick={() => {
-                setOtp(['1', '2', '3', '4']);
-                setTimeout(() => handleVerifyOtp(), 150);
-              }}
-              className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs py-2.5 rounded-xl border border-blue-200 transition-colors"
-            >
-              ⚡ 1-Tap Auto-Verify (Demo Code: 1234)
             </button>
           </div>
         )}

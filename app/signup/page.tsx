@@ -8,9 +8,14 @@ import {
   ArrowRight,
   Mail,
   Lock,
+  Store,
+  Phone,
+  Gift,
   CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { useLoyaltyStore } from '@/lib/loyaltyStore';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -19,20 +24,20 @@ export default function SignUpPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Step 1: Account
-  const [email, setEmail] = useState('founder@saffroncafe.com');
-  const [password, setPassword] = useState('Passcode123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Step 2: Store Identity
-  const [businessName, setBusinessName] = useState('Saffron Artisanal Cafe');
+  const [businessName, setBusinessName] = useState('');
   const [category, setCategory] = useState('Specialty Coffee & Bakery');
-  const [instagram, setInstagram] = useState('saffron_cafe_hyd');
+  const [phone, setPhone] = useState('');
+  const [instagram, setInstagram] = useState('');
 
   // Step 3: Loyalty Rules
-  const [gameType, setGameType] = useState<'mystery_vault' | 'ten_stamps' | 'scratch_card'>('mystery_vault');
-  const [rewardDesc, setRewardDesc] = useState('Free Signature Artisanal Beverage & Truffle Croissant');
+  const [rewardDesc, setRewardDesc] = useState('Free Signature Drink or Bakery Item');
 
   const [isLoading, setIsLoading] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const categories = [
     'Specialty Coffee & Bakery',
@@ -40,42 +45,104 @@ export default function SignUpPage() {
     'Fine Dining & Bar',
     'Dessert & Gelato Lab',
     'Retail & Boutique',
+    'Salon & Spa',
   ];
 
-  const handleCompleteSignUp = async () => {
-    setIsLoading(true);
-    setStatusMsg('Registering your business in Supabase...');
-
-    // 1. Update local state immediately for instant responsive feel
-    await updateBusiness({
-      name: businessName,
-      category,
-      instagram_handle: instagram,
-      active_game_type: gameType,
-      reward_description: rewardDesc,
-    });
-
-    // 2. Fire Supabase registration via server API route
-    try {
-      fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          businessName,
-          category,
-          instagram,
-        }),
-      }).catch(() => {});
-    } catch {
-      // Handled
+  const handleStep1 = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    if (!email || !email.includes('@')) {
+      setErrorMessage('Please enter a valid work email.');
+      return;
     }
+    if (!password || password.length < 6) {
+      setErrorMessage('Password must be at least 6 characters.');
+      return;
+    }
+    setStep(2);
+  };
 
-    setTimeout(() => {
-      setIsLoading(false);
+  const handleStep2 = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    if (!businessName.trim()) {
+      setErrorMessage('Please enter your business / store name.');
+      return;
+    }
+    setStep(3);
+  };
+
+  const handleCompleteSignUp = async () => {
+    setErrorMessage(null);
+    setIsLoading(true);
+
+    try {
+      // 1. Real Supabase Auth Registration
+      if (!supabase) {
+        throw new Error('Supabase client is not connected.');
+      }
+
+      const { error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            business_name: businessName,
+            category,
+            phone,
+            instagram_handle: instagram,
+          },
+        },
+      });
+
+      if (authError) {
+        throw new Error(authError.message);
+      }
+
+      // 2. Insert into public.businesses table
+      const formattedPhone = phone ? (phone.includes('+91') ? phone : `+91 ${phone.replace(/\D/g, '').slice(-10)}`) : null;
+      const { data: bData, error: bError } = await supabase
+        .from('businesses')
+        .insert({
+          name: businessName,
+          category,
+          phone: formattedPhone,
+          instagram_handle: instagram.replace('@', ''),
+        })
+        .select()
+        .single();
+
+      if (bError) {
+        console.warn('Business insert warning:', bError.message);
+      }
+
+      // 3. Insert reward rules
+      if (bData) {
+        await supabase.from('reward_rules').insert({
+          business_id: bData.id,
+          target_stamps: 5,
+          reward_description: rewardDesc,
+        });
+
+        // Update active business in store
+        await updateBusiness({
+          id: bData.id,
+          name: bData.name,
+          category: bData.category,
+          phone: bData.phone || '',
+          instagram_handle: bData.instagram_handle || '',
+          target_stamps: 5,
+          reward_description: rewardDesc,
+        });
+      }
+
+      // Route to dashboard
       router.push('/merchant/dashboard');
-    }, 400);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed. Please check your credentials.';
+      setErrorMessage(msg);
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -101,38 +168,30 @@ export default function SignUpPage() {
               />
             ))}
           </div>
+
+          <span className="text-xs font-bold text-gray-400 font-mono">Step {step}/3</span>
         </div>
 
-        <div className="mb-6">
-          <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
-            Step {step} of 3: {step === 1 ? 'Credentials' : step === 2 ? 'Store Identity' : 'Loyalty Engine'}
-          </div>
-          <h2 className="text-2xl font-black text-gray-950 tracking-tight">
-            {step === 1
-              ? 'Merchant Account'
-              : step === 2
-              ? 'Tell Us About Your Store'
-              : 'Choose Gamification Engine'}
-          </h2>
-          <p className="text-gray-500 text-xs mt-1 leading-relaxed">
-            {step === 1
-              ? 'Create your master account to manage your store loyalty cards.'
-              : step === 2
-              ? 'This branding appears on your digital counter pass & standee.'
-              : 'Select how walk-in guests earn and unlock rewards.'}
-          </p>
-        </div>
-
-        {statusMsg && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs font-semibold flex items-center gap-2">
-            <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
-            <span>{statusMsg}</span>
+        {/* Error Notification */}
+        {errorMessage && (
+          <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
-        {/* Step 1: Account */}
+        {/* Step 1: Account Credentials */}
         {step === 1 && (
-          <div className="space-y-4">
+          <form onSubmit={handleStep1} className="space-y-4">
+            <div>
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight mb-1">
+                Create Merchant Account
+              </h2>
+              <p className="text-xs text-gray-500 leading-relaxed mb-6">
+                Register with your business email to manage your digital loyalty cards and counter scanner.
+              </p>
+            </div>
+
             <div>
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
                 Work Email
@@ -141,11 +200,11 @@ export default function SignUpPage() {
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                 <input
                   type="email"
+                  required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@business.com"
-                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
-                  required
+                  placeholder="owner@yourstore.com"
+                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
                 />
               </div>
             </div>
@@ -158,122 +217,131 @@ export default function SignUpPage() {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                 <input
                   type="password"
+                  required
+                  minLength={6}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
-                  required
+                  placeholder="Min. 6 characters"
+                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
                 />
               </div>
             </div>
-          </div>
+
+            <button
+              type="submit"
+              className="w-full mt-4 bg-black hover:bg-neutral-900 text-white font-bold text-sm py-4 rounded-xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+            >
+              <span>Continue to Store Profile</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
         )}
 
         {/* Step 2: Store Identity */}
         {step === 2 && (
-          <div className="space-y-4">
+          <form onSubmit={handleStep2} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
-                Store Name
-              </label>
-              <input
-                type="text"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="e.g. Saffron Artisanal Cafe"
-                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
-                required
-              />
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight mb-1">
+                Store Identity
+              </h2>
+              <p className="text-xs text-gray-500 leading-relaxed mb-6">
+                Tell us about your brand so customers see your logo and store details on their pass.
+              </p>
             </div>
 
             <div>
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
-                Category
+                Store / Brand Name
+              </label>
+              <div className="relative">
+                <Store className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  required
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  placeholder="e.g. Blue Tokai Coffee"
+                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
+                Industry Category
               </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
+                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all cursor-pointer"
               >
                 {categories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
 
             <div>
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
-                Instagram Handle (without @)
+                Counter Contact Phone (Optional)
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                  className="w-full py-3.5 pl-12 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">
+                Instagram Handle (Optional)
               </label>
               <input
                 type="text"
                 value={instagram}
                 onChange={(e) => setInstagram(e.target.value)}
-                placeholder="saffron_cafe_hyd"
-                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
+                placeholder="e.g. bluetokaicoffee"
+                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
               />
             </div>
-          </div>
+
+            <button
+              type="submit"
+              className="w-full mt-4 bg-black hover:bg-neutral-900 text-white font-bold text-sm py-4 rounded-xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+            >
+              <span>Continue to Reward Rules</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
         )}
 
-        {/* Step 3: Loyalty Rules */}
+        {/* Step 3: Reward Rules */}
         {step === 3 && (
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-2">
-                Select Active Game
-              </label>
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setGameType('mystery_vault')}
-                  className={`w-full p-3 rounded-2xl border text-left flex items-center gap-3 transition-all ${
-                    gameType === 'mystery_vault'
-                      ? 'border-purple-600 bg-purple-50 ring-2 ring-purple-600/20'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  <span className="text-xl">🗝️</span>
-                  <div>
-                    <span className="text-xs font-black block">Mystery Vault (5 Keys)</span>
-                    <span className="text-[10px] text-gray-500">Telugu suspense copy & reveals</span>
-                  </div>
-                </button>
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight mb-1">
+                Loyalty Reward Rules
+              </h2>
+              <p className="text-xs text-gray-500 leading-relaxed mb-6">
+                Configure your 5-Key Mystery Vault reward that customers unlock upon 5 visits.
+              </p>
+            </div>
 
-                <button
-                  type="button"
-                  onClick={() => setGameType('ten_stamps')}
-                  className={`w-full p-3 rounded-2xl border text-left flex items-center gap-3 transition-all ${
-                    gameType === 'ten_stamps'
-                      ? 'border-amber-600 bg-amber-50 ring-2 ring-amber-600/20'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  <span className="text-xl">☕</span>
-                  <div>
-                    <span className="text-xs font-black block">Classic 10 Stamps</span>
-                    <span className="text-[10px] text-gray-500">Traditional punch card progression</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setGameType('scratch_card')}
-                  className={`w-full p-3 rounded-2xl border text-left flex items-center gap-3 transition-all ${
-                    gameType === 'scratch_card'
-                      ? 'border-rose-600 bg-rose-50 ring-2 ring-rose-600/20'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  <span className="text-xl">🎟️</span>
-                  <div>
-                    <span className="text-xs font-black block">Lucky Scratch Card</span>
-                    <span className="text-[10px] text-gray-500">Scratch foil to reveal prize</span>
-                  </div>
-                </button>
+            <div className="p-4 rounded-2xl border-2 border-black bg-purple-50/50">
+              <div className="flex items-center gap-2 mb-2">
+                <Gift className="text-purple-600" size={18} />
+                <span className="text-xs font-black uppercase text-purple-900">
+                  Mystery Vault (5 Keys)
+                </span>
               </div>
+              <p className="text-xs text-gray-600">
+                Customers receive 1 key per counter scan. Unlocking 5 keys unlocks the Grand Mystery Gift!
+              </p>
             </div>
 
             <div>
@@ -282,54 +350,43 @@ export default function SignUpPage() {
               </label>
               <input
                 type="text"
+                required
                 value={rewardDesc}
                 onChange={(e) => setRewardDesc(e.target.value)}
-                placeholder="e.g. Free Artisanal Dessert"
-                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-bold text-sm"
+                placeholder="e.g. Free Artisanal Cold Brew & Pastry"
+                className="w-full py-3.5 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-black outline-none text-gray-900 font-medium text-sm transition-all"
               />
             </div>
+
+            <button
+              onClick={handleCompleteSignUp}
+              disabled={isLoading}
+              className="w-full mt-4 bg-black hover:bg-neutral-900 text-white font-bold text-sm py-4 rounded-xl shadow-lg shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin" size={16} />
+                  <span>Connecting Store to Supabase...</span>
+                </>
+              ) : (
+                <>
+                  <span>Complete Setup & Open Dashboard</span>
+                  <CheckCircle2 size={16} />
+                </>
+              )}
+            </button>
           </div>
         )}
       </div>
 
-      {/* Action Footer */}
-      <div className="pt-6 space-y-3">
-        {step < 3 ? (
-          <button
-            onClick={() => setStep((prev) => (prev === 1 ? 2 : 3))}
-            className="w-full bg-[#09090B] hover:bg-neutral-900 text-white font-bold text-sm py-4 px-6 rounded-2xl shadow-xl shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border border-neutral-800"
-          >
-            <span>Continue to Step {step + 1}</span>
-            <ArrowRight size={16} />
-          </button>
-        ) : (
-          <button
-            onClick={handleCompleteSignUp}
-            disabled={isLoading}
-            className="w-full bg-[#09090B] hover:bg-neutral-900 text-white font-bold text-sm py-4 px-6 rounded-2xl shadow-xl shadow-black/15 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border border-neutral-800 disabled:opacity-75"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="animate-spin" size={16} />
-                <span>Launching Store...</span>
-              </>
-            ) : (
-              <>
-                <span>Complete Setup & Enter Dashboard</span>
-                <CheckCircle2 size={16} />
-              </>
-            )}
-          </button>
-        )}
-
-        <div className="text-center">
-          <button
-            onClick={() => router.push('/login')}
-            className="text-xs text-gray-500 hover:text-black transition-colors"
-          >
-            Already have an account? <span className="font-bold underline text-black">Login</span>
-          </button>
-        </div>
+      {/* Footer Link */}
+      <div className="pt-6 text-center">
+        <button
+          onClick={() => router.push('/login')}
+          className="text-xs text-gray-500 hover:text-black transition-colors"
+        >
+          Already have an account? <span className="font-bold underline text-black">Log In</span>
+        </button>
       </div>
     </div>
   );

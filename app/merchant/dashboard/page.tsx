@@ -13,11 +13,12 @@ import {
   Sparkles,
   QrCode,
   Coffee,
+  CheckCircle2,
 } from 'lucide-react';
 
 export default function MerchantDashboard() {
   const router = useRouter();
-  const { business, metrics, history, loyalty } = useLoyaltyStore();
+  const { business, metrics, history } = useLoyaltyStore();
 
   return (
     <div className="h-full flex flex-col bg-gray-50 text-gray-900 select-none">
@@ -29,54 +30,54 @@ export default function MerchantDashboard() {
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live PostgREST Sync
+                Live Connected
               </span>
             </div>
             <h1 className="text-2xl font-black text-gray-950 tracking-tight">
-              {business.name}
+              {business.name || 'Store Dashboard'}
             </h1>
-            <p className="text-xs text-gray-400 mt-0.5">{business.category}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{business.category || 'Loyalty Portal'}</p>
           </div>
           <div className="w-11 h-11 rounded-2xl bg-black text-white shadow-md flex items-center justify-center font-black text-sm">
             <Coffee size={20} />
           </div>
         </div>
 
-        {/* Stats Grid: Today's Scans & Active Loyalists */}
+        {/* Stats Grid: Real Total Scans & Active Customers */}
         <div className="grid grid-cols-2 gap-3.5 p-6 pb-4">
-          {/* Card 1: Today's Scans */}
+          {/* Card 1: Total Scans */}
           <div className="bg-white p-4 rounded-3xl shadow-xs border border-gray-200/80 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
               <span className="text-gray-500 text-xs font-bold uppercase tracking-wider">
-                Today&apos;s Scans
+                Total Scans
               </span>
               <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-emerald-200">
-                +18% <ArrowUpRight size={10} />
+                <CheckCircle2 size={10} /> Live
               </span>
             </div>
-            <div className="text-gray-950 text-4xl font-black tracking-tight">
+            <div className="text-gray-950 text-4xl font-black tracking-tight font-mono">
               {metrics.todayScans}
             </div>
             <p className="text-[11px] text-gray-400 mt-2 flex items-center gap-1 font-medium">
-              <Clock size={11} /> Real-time counter
+              <Clock size={11} /> Stamps awarded
             </p>
           </div>
 
-          {/* Card 2: Active Loyalists */}
+          {/* Card 2: Active Customers */}
           <div className="bg-white p-4 rounded-3xl shadow-xs border border-gray-200/80 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
               <span className="text-gray-500 text-xs font-bold uppercase tracking-wider">
-                Active VIPs
+                Active Customers
               </span>
               <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-blue-200">
-                +12 new
+                <Users size={10} /> Total
               </span>
             </div>
-            <div className="text-gray-950 text-4xl font-black tracking-tight">
+            <div className="text-gray-950 text-4xl font-black tracking-tight font-mono">
               {metrics.activeLoyalists}
             </div>
             <p className="text-[11px] text-gray-400 mt-2 flex items-center gap-1 font-medium">
-              <Users size={11} /> 86% return rate
+              <Users size={11} /> Registered passes
             </p>
           </div>
         </div>
@@ -96,7 +97,7 @@ export default function MerchantDashboard() {
                   Open Fast-Scanner
                 </div>
                 <div className="text-xs text-gray-300 font-normal">
-                  Award +1, +2, +3 stamps in &lt; 0.5s
+                  Award +1, +2, +3 stamps in real time
                 </div>
               </div>
             </div>
@@ -104,7 +105,7 @@ export default function MerchantDashboard() {
           </button>
         </div>
 
-        {/* Active Gamification Engine Status */}
+        {/* Active Store Reward Program */}
         <div className="px-6 mb-4">
           <div className="bg-gradient-to-r from-purple-950 via-indigo-950 to-violet-950 text-white p-4 rounded-3xl shadow-sm border border-purple-800/40 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -113,15 +114,13 @@ export default function MerchantDashboard() {
               </div>
               <div>
                 <div className="text-xs font-black flex items-center gap-1.5">
-                  <span className="capitalize">
-                    {business.active_game_type.replace('_', ' ')}
-                  </span>
+                  <span>Mystery Vault</span>
                   <span className="text-[9px] bg-yellow-400/20 text-yellow-300 px-1.5 py-0.2 rounded font-mono font-bold">
-                    {loyalty.currentStamps}/5 Keys
+                    5 Keys
                   </span>
                 </div>
                 <div className="text-[11px] text-purple-200/90 font-medium line-clamp-1">
-                  {business.reward_description}
+                  {business.reward_description || 'Store Benefit'}
                 </div>
               </div>
             </div>
@@ -129,7 +128,7 @@ export default function MerchantDashboard() {
               onClick={() => router.push('/customer/pass')}
               className="bg-white text-purple-950 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 active:scale-95 transition-transform cursor-pointer shadow-xs"
             >
-              <span>Pass</span>
+              <span>View Pass</span>
               <ExternalLink size={12} />
             </button>
           </div>
@@ -155,53 +154,68 @@ export default function MerchantDashboard() {
               onClick={() => router.push('/merchant/settings')}
               className="text-xs font-bold text-blue-600 hover:text-blue-800"
             >
-              Open Print Preview
+              Print Preview
             </button>
           </div>
         </div>
 
-        {/* Recent Activity Feed */}
+        {/* Live Recent Activity Feed */}
         <div className="px-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xs font-black uppercase tracking-wider text-gray-500">
-              Live Counter Activity
+              Counter Activity
             </h2>
             <span className="text-xs font-bold text-blue-600 flex items-center gap-1">
-              <Sparkles size={12} /> Auto-Sync
+              <Sparkles size={12} /> Realtime
             </span>
           </div>
 
-          <div className="bg-white rounded-3xl border border-gray-200/80 divide-y divide-gray-100 shadow-xs overflow-hidden">
-            {history.map((tx) => (
-              <div key={tx.id} className="p-3.5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-800 font-mono">
-                    {tx.customerPhone.slice(-2)}
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-gray-900">
-                      {tx.customerPhone}
-                    </div>
-                    <div className="text-[11px] text-gray-500 font-medium">
-                      {tx.action}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      tx.badge === 'Unlocked' || tx.badge === 'Reward'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-blue-50 text-blue-700'
-                    }`}
-                  >
-                    {tx.badge}
-                  </span>
-                  <div className="text-[10px] text-gray-400 mt-0.5">{tx.time}</div>
-                </div>
+          {history.length === 0 ? (
+            /* Empty State when Database has no scans */
+            <div className="bg-white rounded-3xl border border-gray-200/80 p-8 text-center shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-gray-100 text-gray-400 mx-auto flex items-center justify-center mb-3">
+                <Clock size={20} />
               </div>
-            ))}
-          </div>
+              <h3 className="text-sm font-bold text-gray-900 mb-1">
+                No Customer Scans Yet
+              </h3>
+              <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                Open the Fast-Scanner and scan a customer QR code to award their first stamps.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-3xl border border-gray-200/80 divide-y divide-gray-100 shadow-xs overflow-hidden">
+              {history.map((tx) => (
+                <div key={tx.id} className="p-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-800 font-mono">
+                      {tx.customerPhone.slice(-2)}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-gray-900">
+                        {tx.customerPhone}
+                      </div>
+                      <div className="text-[11px] text-gray-500 font-medium">
+                        {tx.action}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        tx.badge === 'Vault Unlocked'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-blue-50 text-blue-700'
+                      }`}
+                    >
+                      {tx.badge}
+                    </span>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{tx.time}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
