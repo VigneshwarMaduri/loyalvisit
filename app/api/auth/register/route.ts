@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       try {
         const uniqueEmail = email.includes('+')
           ? email
-          : `${email.split('@')[0]}+${Date.now()}@${email.split('@')[1] || 'nextvisit.app'}`;
+          : `${email.split('@')[0]}+${Date.now()}@${email.split('@')[1] || 'loyalvisit.app'}`;
 
         const res = await supabase.auth.signUp({
           email: uniqueEmail,

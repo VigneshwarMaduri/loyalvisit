@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'NextVisit - Turn Walk-ins into Regulars',
-  description: 'B2B Customer Loyalty and Retention Platform',
+  title: 'LoyalVisit - Turn Walk-ins into Regulars',
+  description: 'LoyalVisit - B2B Digital Loyalty & Retention Platform',
 };
 
 export default function RootLayout({

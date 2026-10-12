@@ -42,11 +42,11 @@ export interface ScanActivity {
 }
 
 const STORAGE_KEYS = {
-  BUSINESS: 'returnwin_business_profile',
-  CUSTOMER_SESSION: 'returnwin_customer_session',
-  LOYALTY: 'returnwin_customer_loyalty',
-  METRICS: 'returnwin_merchant_metrics',
-  HISTORY: 'returnwin_scan_history',
+  BUSINESS: 'loyalvisit_business_profile',
+  CUSTOMER_SESSION: 'loyalvisit_customer_session',
+  LOYALTY: 'loyalvisit_customer_loyalty',
+  METRICS: 'loyalvisit_merchant_metrics',
+  HISTORY: 'loyalvisit_scan_history',
 };
 
 const isValidUuid = (val: string) =>
@@ -109,7 +109,7 @@ function writeStorage<T>(key: string, value: T) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
-    window.dispatchEvent(new Event('returnwin_state_sync'));
+    window.dispatchEvent(new Event('loyalvisit_state_sync'));
   } catch (err) {
     console.error('Failed to write to localStorage', err);
   }
@@ -189,7 +189,7 @@ export function useLoyaltyStore() {
     loadLocalState();
 
     const handleSync = () => loadLocalState();
-    window.addEventListener('returnwin_state_sync', handleSync);
+    window.addEventListener('loyalvisit_state_sync', handleSync);
     window.addEventListener('storage', handleSync);
 
     // Initial Supabase fetch
@@ -218,7 +218,7 @@ export function useLoyaltyStore() {
     }
 
     return () => {
-      window.removeEventListener('returnwin_state_sync', handleSync);
+      window.removeEventListener('loyalvisit_state_sync', handleSync);
       window.removeEventListener('storage', handleSync);
       if (channel) {
         supabase.removeChannel(channel);

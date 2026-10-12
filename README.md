@@ -1,36 +1,30 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LoyalVisit — B2B Digital Loyalty & Retention Platform
 
-## Getting Started
+LoyalVisit transforms walk-in customers into high-frequency regulars through instant mobile web passes, gamified rewards (Mystery Vault), and a lightning-fast merchant camera scanner.
 
-First, run the development server:
+## Key Features
+
+- **Mobile-First Experience**: High-converting, frictionless UI designed strictly for mobile viewports.
+- **Instant Customer Web Pass (`/customer/pass`)**: Zero app store installation needed. Customers access their loyalty card and scannable QR token via browser.
+- **Fast Merchant Scanner (`/merchant/scanner`)**: High-speed camera scanner powered by `html5-qrcode` with single-tap stamp awarding (`+1`, `+2`, `+3`).
+- **Real-Time Supabase Sync**: PostgreSQL database with Row Level Security (RLS) and real-time subscription channels.
+- **Table Standees (`/merchant/settings`)**: Instant high-resolution QR standees for customer onboarding (`/join/[businessId]`).
+
+## Tech Stack
+
+- **Framework**: Next.js 14+ (App Router)
+- **Styling**: Tailwind CSS, Lucide React
+- **Backend & Auth**: Supabase (PostgreSQL, Realtime, Auth)
+- **Scanning & Codes**: `html5-qrcode`, `qrcode.react`
+
+## Quick Start
 
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open [http://localhost:3000](http://localhost:3000) to view the application.

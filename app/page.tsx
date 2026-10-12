@@ -27,7 +27,7 @@ export default function LandingPage() {
           </div>
           <div>
             <span className="font-black text-base tracking-tight text-gray-950 block leading-tight">
-              NextVisit
+              LoyalVisit
             </span>
             <span className="text-[10px] text-gray-400 font-medium tracking-wide">
               DIGITAL LOYALTY
@@ -173,7 +173,7 @@ export default function LandingPage() {
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">
             Frictionless Mechanism
           </h3>
-          <h2 className="text-2xl font-black text-gray-950">How NextVisit Works</h2>
+          <h2 className="text-2xl font-black text-gray-950">How LoyalVisit Works</h2>
         </div>
 
         <div className="space-y-3.5">
@@ -261,7 +261,7 @@ export default function LandingPage() {
         </button>
 
         <p className="text-[11px] text-gray-400">
-          NextVisit Loyalty © 2026 • Built for modern cafes & retail
+          LoyalVisit Loyalty © 2026 • Built for modern cafes & retail
         </p>
       </footer>
     </div>

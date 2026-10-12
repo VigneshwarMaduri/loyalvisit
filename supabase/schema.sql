@@ -1,5 +1,5 @@
 -- ==============================================================================
--- NextVisit — Master Supabase Database Schema (Idempotent Production Migration)
+-- LoyalVisit — Master Supabase Database Schema (Idempotent Production Migration)
 -- Handles existing tables, adds missing columns, sets up RLS & Realtime sync
 -- ==============================================================================
 

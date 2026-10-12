@@ -491,7 +491,7 @@ export default function CustomerPassPage() {
             <div className="bg-white p-4 rounded-3xl border-2 border-slate-900 inline-block mb-4 shadow-xl">
               <QRCodeSVG
                 value={JSON.stringify({
-                  type: 'NEXTVISIT_PASS',
+                  type: 'LOYALVISIT_PASS',
                   customerId: customer.id,
                   phone: customer.phone || '+91 98765 43210',
                   stamps: loyalty.currentStamps,

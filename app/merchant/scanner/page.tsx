@@ -113,6 +113,7 @@ export default function MerchantScanner() {
         } catch {}
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync identified customer with live loyalty store
@@ -126,9 +127,9 @@ export default function MerchantScanner() {
   const handleAddStamps = async (count: number) => {
     if (isProcessing) return;
     setIsProcessing(true);
+    setToast(`+${count} Stamp${count > 1 ? 's' : ''} Awarded!`);
 
     await awardStamps(count, identifiedCustomer.phone);
-    setToast(`+${count} Stamp${count > 1 ? 's' : ''} Awarded!`);
 
     setTimeout(() => {
       setToast(null);
